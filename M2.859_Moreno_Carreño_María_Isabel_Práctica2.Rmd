@@ -1,0 +1,276 @@
+---
+title: "Tratamientos de datos para la Práctica 2. Visualización de Datos"
+author: "María Isabel Moreno Carreño"
+ 
+output: 
+  pdf_document :
+    
+    latex_engine: xelatex
+    toc: true 
+  word_document :
+  html_document :
+linkcolor: blue
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r,eval=TRUE,echo=FALSE}
+#Si da error generando el pdf, usa estos comandos:
+#install.packages("tinytex")
+#tinytex::install_tinytex()
+#tinytex::reinstall_tinytex()
+
+
+#tinytex::tlmgr_install("xetex")
+# Cargar las librerías necesarias
+library(readxl)
+library(readr)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(tidyr)
+library(sf)
+library(tidyverse)
+```
+
+# 1. Carga y revisión inicial de los datos.
+
+Antes de efectuar el análisis, lo primero que se debe hacer es comprobar
+el formato de los datos, para esta comprobación se usa Encoding, si es
+"unknown", nos indica que el programa utiliza el formato del sistema
+operativo. En este caso, se comprueba con Sys.getlocale("LC_CTYPE").
+
+El siguiente paso consiste en extraer los datos del archivo excel.
+
+Finalmente, se comprueba que los datos cargen correctamente, se muestran
+los nombres de las columnas y la estructura del dataset.
+
+```{r,eval=TRUE,echo=TRUE,warning=FALSE}
+
+Encoding("i")
+Sys.getlocale("LC_CTYPE")
+
+# Carga del DataSet para revisión
+
+incendios_raw <- read_excel("Xlsx_20251129_112520_1.xlsx")
+
+# dimensión del dataset
+dim(incendios_raw)
+
+# Mostrar la estructura del dataset
+str(incendios_raw)
+
+```
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+# Estadísticas
+summary(incendios_raw)
+```
+
+# 2. Tratamiento y Revisión de las Variables.
+
+Se filtran los datos para quedarnos con los años 2015 a 2021 y la comunidad
+de Andalucía, excluyendo Extremadura y Badajoz.
+
+Se tipifican las variables numéricas, reemplazando las comas por puntos
+decimales y los valores NA por ceros.
+
+Se convierten las variables de fecha en formato fecha-hora y se crean
+variables temporales adicionales: número de mes y duración del incendio
+en horas.
+
+Se limpian los factores y nombres para que se visualicen correctamente
+en las gráficas, ajustando los nombres de las provincias y manejando
+los valores faltantes en las variables categóricas "Causa" y "Motivación
+".
+
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+
+incendios_final <- incendios_raw %>%
+  # Se elimina año 2022 y se filtra por Andalucía.
+  filter(Campania >= 2015 & Campania <= 2021) %>%
+  filter(Comunidad == "ANDALUCIA" & !Provincia %in% c("BADAJOZ", "EXTREMADURA")) %>%
+  
+  # Tratamiento de números y superficies
+  mutate(
+    across(c(SuperficieArbolada, SuperficieNoArbolada, SuperficieTotalForestal, 
+             SuperficieAgricola, CoordenadaX, CoordenadaY), 
+           ~ as.numeric(gsub(",", ".", .))),
+    across(where(is.numeric), ~ replace_na(., 0))
+  ) %>%
+  
+  # Tratamiento de Fechas y creación de variables 
+  mutate(
+    Detectado = dmy_hms(Detectado),
+    Extinguido = dmy_hms(Extinguido),
+    Mes = month(Detectado),  
+    Duracion_H = as.numeric(difftime(Extinguido, Detectado, units = "hours"))
+  ) %>%
+  
+  # Limpieza de Factores y Nombres 
+  mutate(
+    Provincia = case_when(
+      Provincia == "ALMERIA" ~ "Almería",
+      Provincia == "CADIZ"   ~ "Cádiz",
+      Provincia == "CORDOBA" ~ "Córdoba",
+      Provincia == "JAEN"    ~ "Jaén",
+      Provincia == "MALAGA"  ~ "Málaga",
+      TRUE ~ str_to_title(Provincia)
+    ),
+    Causa = ifelse(is.na(Causa) | Causa %in% c("", "-"), "Desconocida", as.character(Causa)),
+    Motivacion = ifelse(is.na(Motivacion) | Motivacion %in% c("", "-"), "Sin especificar", as.character(Motivacion))
+  )
+```
+
+# Provincias y total de incendios.
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+# (1) Número de incendios por Provincia y Campaña
+tabla_provincias_limpia <- incendios_final %>%
+  group_by(Provincia) %>%
+  summarise(Total_Incendios = n()) %>%
+  # Corregimos los nombres manualmente para asegurar tildes y formato
+  mutate(Provincia = case_when(
+    str_detect(toupper(Provincia), "ALMERIA") ~ "Almería",
+    str_detect(toupper(Provincia), "CADIZ")   ~ "Cádiz",
+    str_detect(toupper(Provincia), "CORDOBA") ~ "Córdoba",
+    str_detect(toupper(Provincia), "GRANADA") ~ "Granada",
+    str_detect(toupper(Provincia), "HUELVA")  ~ "Huelva",
+    str_detect(toupper(Provincia), "JAEN")    ~ "Jaén",
+    str_detect(toupper(Provincia), "MALAGA")  ~ "Málaga",
+    str_detect(toupper(Provincia), "SEVILLA") ~ "Sevilla",
+    TRUE ~ Provincia
+  )) %>%
+  arrange(desc(Total_Incendios))
+
+write_excel_csv(tabla_provincias_limpia, "Tabla_Incendios_Provincia_Limpia.csv")
+```
+
+
+# Campaña, mes y hectáreas
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+# (2) Hectáreas quemadas por Mes y Año
+
+
+nombres_meses <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
+
+hectareas_mes_año <- incendios_final %>%
+  group_by(Año = Campania, Mes) %>%
+  summarise(
+    Superficie_Total_Forestal = sum(SuperficieTotalForestal, na.rm = TRUE), 
+    .groups = 'drop'
+  ) %>%
+  mutate(Mes_Nombre = nombres_meses[Mes]) %>%
+  arrange(Año, Mes)
+
+write_excel_csv(hectareas_mes_año, "Hectareas_Mes_Año.csv")
+```  
+
+# Causas, motivación, incendios y Hectareas.
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+# (3) Motivación - Incendio y hectáreas 
+
+causas_jerarquia <- incendios_final %>%
+  mutate(
+    Causa_Txt = as.character(Causa),
+    Motivacion_Txt = ifelse(is.na(Motivacion) | Motivacion %in% c("", "-", " "), "Sin especificar", as.character(Motivacion)),
+    
+    cod_causa = as.numeric(str_extract(Causa_Txt, "\\d+")),
+    
+    Gran_Grupo = case_when(
+      cod_causa == 100 ~ "Rayo (Natural)",
+      cod_causa >= 200 & cod_causa < 300 ~ "Negligencias",
+      cod_causa >= 300 & cod_causa < 400 ~ "Accidentes y fallos técnicos",
+      cod_causa == 400 ~ "Intencionados",
+      cod_causa == 500 | is.na(cod_causa) ~ "Causa Desconocida",
+      cod_causa == 600 ~ "Reproducido",
+      TRUE ~ "Otras Causas"
+    )
+  ) %>%
+  group_by(Gran_Grupo, Causa = Causa_Txt, Motivacion = Motivacion_Txt) %>%
+  summarise(
+    Suma_Hectareas = sum(SuperficieTotalForestal, na.rm = TRUE),
+    Num_Incendios = n(),
+    .groups = 'drop'
+  )
+
+write_excel_csv(causas_jerarquia, "Analisis_Causas_Jerarquico.csv")
+```
+
+# Duración del incendio por superficie forestal quemada
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}  
+# (4) Duración del incendio por superficie forestal quemada
+
+csv_duracion_superficie <- incendios_final %>%
+filter(
+    Duracion_H > 0 & Duracion_H < 1200,
+    
+    !(SuperficieTotalForestal < 5 & Duracion_H > 150)
+  ) %>%
+  select(
+    Año = Campania,
+    Provincia,
+    Duracion_H,
+    Superficie_Hectareas = SuperficieTotalForestal
+  )
+write_excel_csv(csv_duracion_superficie, "duracion_superficie.csv")
+```
+
+# Ubicación y frecuencia
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}  
+
+# (5) Diapositiva Superficie total forestal por provincias y comarcas y espacios protegidos.
+punto_1_superficie_espacio <- incendios_final %>%
+  select(
+    Campania, 
+    Provincia, 
+    Municipio, 
+    ComarcaIsla, 
+    SuperficieTotalForestal, 
+    AfectoEspacioProtegido
+  )
+
+write_csv(punto_1_superficie_espacio, "punto_1_superficie_espacio.csv")
+```
+
+# Tiempos de extinción.
+
+``` {r,eval=TRUE,echo=TRUE,warning=FALSE}
+# (6)Evolución de Tiempos de Extinción (Año y Provincia) 
+
+evolucion_tiempos <- incendios_final %>%
+  # filtro para eliminar outliers detectados
+  filter(Duracion_H > 0 & Duracion_H < 720) %>% 
+  group_by(Año = Campania, Provincia) %>%
+  summarise(
+    Media_Horas = round(mean(Duracion_H, na.rm = TRUE), 1),
+    Total_Incendios = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(Año, Provincia)
+
+write_excel_csv(evolucion_tiempos, "Evolucion_Tiempos_Extincion.csv")
+
+```
+# Velocidad de propagación de un incendio.
+
+```{r,eval=TRUE,echo=TRUE,warning=FALSE}
+# (7) Velocidad de propagación de un incendio.
+
+velocidad_analisis <- incendios_final %>%
+  filter(SuperficieTotalForestal > 0 & Duracion_H > 0) %>%
+  group_by(Año = Campania) %>%
+  summarise(
+    Superficie_Total_ha = sum(SuperficieTotalForestal, na.rm = TRUE),
+    Duracion_Total_h = sum(Duracion_H, na.rm = TRUE),
+    Velocidad_ha_h = round(Superficie_Total_ha / Duracion_Total_h, 3)
+  )
+
+write_excel_csv(velocidad_analisis, "Resultado_Velocidad_Propagacion.csv")
+```
