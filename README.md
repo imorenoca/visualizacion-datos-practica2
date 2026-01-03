@@ -6,7 +6,11 @@ Superficie forestal quemada en espacios naturales en Andalucía.
 
 - Análisis Estadístico y tratamiento de datos para su publicación en Flourish
 - Datos originales en Excel extraidos de la Web Estadística de Incendios Forestales del Ministerio para la Transición Ecológica y el Reto Demográfico.
+https://servicio.mapa.gob.es/incendios/Search/Publico  
+    - Filtros: Año 2015 - 2022
+    - Andalucía.
 - Archivos csv para la confección de gráficos.
+- Presentación Power Point en pdf: Guía del vídeo.
 
 La presentación se puede visitar en:
 
